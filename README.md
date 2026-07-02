@@ -23,7 +23,7 @@ All three share one context bus: cwd, scrollback, exit codes, shell history — 
 
 ## Status
 
-Early scaffold. Not yet buildable end-to-end — PTY wiring and the AI context bus are next.
+PTY wired: real shell behind the terminal, spawn/write/resize over IPC. AI context bus is next.
 
 ## Structure
 
@@ -35,4 +35,9 @@ src/ai/        Context bus, greenclaw client, suggestion engine
 
 ## License
 
-TBD
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option, matching the upstream Tauri project.
