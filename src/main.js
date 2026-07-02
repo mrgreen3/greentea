@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import '@xterm/xterm/css/xterm.css';
 
 import { ContextBus } from './ai/context-bus.js';
@@ -16,6 +17,7 @@ const term = new Terminal({
   cursorBlink: true,
   cursorStyle: 'bar',
   allowTransparency: true,
+  allowProposedApi: true, // required by the Unicode11 addon
   theme: {
     background: '#00000000', // let the CSS glass background show through
     foreground: '#e8e6e1',
@@ -47,9 +49,10 @@ const contextBus = new ContextBus(term);
 initSidebar(contextBus);
 initSuggestions(term, contextBus);
 
-// Sanity check that Tauri IPC is wired up; replaced by real PTY
-// spawn/write/resize commands once lib.rs grows them.
-invoke('greeting').then((msg) => {
-  term.writeln(`\x1b[90m${msg}\x1b[0m`);
-  term.writeln("\x1b[90mPTY not wired up yet \u2014 this is a scaffold.\x1b[0m");
-});
+term.onData((data) => invoke('write_pty', { data }));
+term.onResize(({ cols, rows }) => invoke('resize_pty', { cols, rows }));
+
+// Register the output listener before spawning so early output isn't lost.
+listen('pty://output', (event) => term.write(event.payload))
+  .then(() => invoke('spawn_pty', { cols: term.cols, rows: term.rows }))
+  .catch((e) => term.writeln(`\x1b[31mfailed to start shell: ${e}\x1b[0m`));
