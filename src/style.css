@@ -1,0 +1,76 @@
+/* greentea base theme.
+   Goal: look like a webpage, not a man page. Glass panels, real type,
+   soft motion. Swap the CSS vars below for full re-theming. */
+
+:root {
+  --bg: #14171a;
+  --bg-glass: rgba(20, 23, 26, 0.72);
+  --fg: #e8e6e1;
+  --accent: #8fd6a8;
+  --muted: #7a8288;
+  --radius: 10px;
+  --font-ui: -apple-system, 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+#terminal {
+  flex: 1;
+  padding: 12px;
+  min-width: 0;
+}
+
+#ai-sidebar {
+  width: 340px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(14px);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.18s ease, opacity 0.18s ease;
+}
+
+#ai-sidebar.collapsed {
+  width: 0;
+  opacity: 0;
+  border-left: none;
+}
+
+#ai-sidebar-header {
+  padding: 14px 16px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+#ai-sidebar-body {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* xterm.js ships its own styles; this just makes the canvas/container
+   sit flush and lets the WebGL renderer's canvas fill its parent. */
+.xterm {
+  height: 100%;
+}
