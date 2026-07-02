@@ -12,7 +12,7 @@ import { initSidebar } from './ai/sidebar.js';
 import { initSuggestions } from './ai/suggestions.js';
 
 const term = new Terminal({
-  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  fontFamily: "'FiraCode Nerd Font', 'JetBrains Mono', 'Fira Code', monospace",
   fontSize: 14,
   cursorBlink: true,
   cursorStyle: 'bar',
