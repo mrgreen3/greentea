@@ -79,7 +79,7 @@ def show_in_walker(text: str) -> None:
     """
     try:
         subprocess.run(
-            ["walker", "--dmenu"],
+            ["walker", "--dmenu", "--theme", "paint"],
             input=text,
             text=True,
             check=False,
