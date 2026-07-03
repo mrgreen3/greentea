@@ -15,7 +15,7 @@ to change.
 
 Config via environment variables, no config file needed for v1:
   GREENTEA_OLLAMA_URL   default: http://localhost:11434
-  GREENTEA_MODEL        default: qwen2.5:latest
+  GREENTEA_MODEL        default: kimi-k2.7-code:cloud
 """
 
 import json
@@ -25,7 +25,7 @@ import sys
 import urllib.request
 
 OLLAMA_URL = os.environ.get("GREENTEA_OLLAMA_URL", "http://localhost:11434")
-MODEL = os.environ.get("GREENTEA_MODEL", "qwen2.5:latest")
+MODEL = os.environ.get("GREENTEA_MODEL", "kimi-k2.7-code:cloud")
 
 SYSTEM_PROMPT = (
     "You are a terminal assistant. You've been shown the visible "
