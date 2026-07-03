@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""
+greentea-ask — the AI companion for foot.
+
+Triggered by foot's pipe-visible keybinding (see foot.ini). Reads
+whatever foot piped to stdin, sends it to a local model, and shows
+the answer in a walker dmenu popup.
+
+Talks directly to Ollama for now — NOT routed through greenclaw.
+greenclaw doesn't currently expose a local query interface (it's
+Telegram-driven), so this stays a standalone script rather than
+inventing an API that doesn't exist. If/when greenclaw grows a local
+endpoint, swap the call in ask_model() and nothing else here needs
+to change.
+
+Config via environment variables, no config file needed for v1:
+  GREENTEA_OLLAMA_URL   default: http://localhost:11434
+  GREENTEA_MODEL        default: qwen2.5:latest
+"""
+
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+
+OLLAMA_URL = os.environ.get("GREENTEA_OLLAMA_URL", "http://localhost:11434")
+MODEL = os.environ.get("GREENTEA_MODEL", "qwen2.5:latest")
+
+SYSTEM_PROMPT = (
+    "You are a terminal assistant. You've been shown the visible "
+    "contents of the user's terminal screen. Answer their question "
+    "concisely — a sentence or two, or a short command if that's "
+    "what's needed. No preamble."
+)
+
+
+def read_piped_screen() -> str:
+    data = sys.stdin.read()
+    return data.strip()
+
+
+def ask_model(screen_content: str) -> str:
+    """Send the screen content to Ollama and return the model's reply.
+
+    Swap point: if greenclaw grows a local query interface, this is
+    the only function that needs to change.
+    """
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": screen_content or "(empty screen)"},
+        ],
+        "stream": False,
+    }
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read())
+            return body.get("message", {}).get("content", "").strip() or "(empty response)"
+    except urllib.error.URLError as e:
+        return f"greentea-ask: couldn't reach Ollama at {OLLAMA_URL} ({e})"
+    except Exception as e:
+        return f"greentea-ask: unexpected error ({e})"
+
+
+def show_in_walker(text: str) -> None:
+    """Pipe the answer into walker's dmenu mode.
+
+    v1 is single-shot display, not a real chat — walker shows the
+    text, selecting/dismissing just closes it. Multi-line answers are
+    passed as-is; walker wraps rather than truncates in dmenu mode.
+    """
+    try:
+        subprocess.run(
+            ["walker", "--dmenu"],
+            input=text,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        # walker not installed/on PATH — fail loud to stderr rather than
+        # silently losing the answer, since foot's pipe actions don't
+        # surface script errors anywhere visible by default.
+        sys.stderr.write(f"greentea-ask: walker not found, answer was:\n{text}\n")
+
+
+def main() -> None:
+    screen = read_piped_screen()
+    answer = ask_model(screen)
+    show_in_walker(answer)
+
+
+if __name__ == "__main__":
+    main()
