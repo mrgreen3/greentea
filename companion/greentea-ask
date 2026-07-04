@@ -41,10 +41,10 @@ def read_piped_screen() -> str:
 
 
 def ask_question() -> str:
-    """Open walker for the user to type a question. Returns empty string if dismissed."""
+    """Open rofi for the user to type a question. Returns empty string if dismissed."""
     try:
         result = subprocess.run(
-            ["walker", "--dmenu", "--inputonly", "--placeholder", "Ask about your terminal...", "--theme", "paint"],
+            ["rofi", "-dmenu", "-p", "greentea:", "-theme", "mango"],
             input="",
             text=True,
             capture_output=True,
@@ -52,7 +52,7 @@ def ask_question() -> str:
         )
         return result.stdout.strip()
     except FileNotFoundError:
-        sys.stderr.write("greentea-ask: walker not found\n")
+        sys.stderr.write("greentea-ask: rofi not found\n")
         return ""
 
 
@@ -87,25 +87,17 @@ def ask_model(screen_content: str, question: str) -> str:
         return f"greentea-ask: unexpected error: {e}"
 
 
-def show_in_walker(text: str) -> None:
-    """Pipe the answer into walker's dmenu mode.
-
-    v1 is single-shot display, not a real chat — walker shows the
-    text, selecting/dismissing just closes it. Multi-line answers are
-    passed as-is; walker wraps rather than truncates in dmenu mode.
-    """
+def show_answer(text: str) -> None:
+    """Pipe the answer into rofi's dmenu mode for display."""
     try:
         subprocess.run(
-            ["walker", "--dmenu", "--theme", "paint"],
+            ["rofi", "-dmenu", "-p", "answer:", "-theme", "mango", "-no-custom"],
             input=text,
             text=True,
             check=False,
         )
     except FileNotFoundError:
-        # walker not installed/on PATH — fail loud to stderr rather than
-        # silently losing the answer, since foot's pipe actions don't
-        # surface script errors anywhere visible by default.
-        sys.stderr.write(f"greentea-ask: walker not found, answer was:\n{text}\n")
+        sys.stderr.write(f"greentea-ask: rofi not found, answer was:\n{text}\n")
 
 
 def main() -> None:
@@ -114,7 +106,7 @@ def main() -> None:
     if not question:
         sys.exit(0)
     answer = ask_model(screen, question)
-    show_in_walker(answer)
+    show_answer(answer)
 
 
 if __name__ == "__main__":
