@@ -1,26 +1,25 @@
 """
 greentea — a persistent TUI chat client for greenclaw.
 
-This is the skeleton stage (greentea#7): message log + input, proving
-the UI loop works. No greenclaw wiring yet — that's blocked on
-greenclaw#41 (local channel) and will be its own follow-up.
-
 Run locally:
     python greentea.py
 
-Run over SSH: works with zero changes — Textual apps read/write via
-stdin/stdout escape sequences same as any TUI, nothing special needed.
-
-Serve in a browser (e.g. for phone access):
-    textual serve greentea.py
-Then open the printed URL from any device on the same network.
+Serve in a browser (LAN):
+    ./serve.sh
 """
 
+import json
 from datetime import datetime
 
+import httpx
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Header, Footer, Input, RichLog
+from textual import work
+
+
+OLLAMA_URL = "http://localhost:11434/api/chat"
+MODEL = "gemma4:cloud"
 
 
 class GreenteaApp(App):
@@ -44,8 +43,11 @@ class GreenteaApp(App):
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
-        ("ctrl+l", "clear_log", "Clear"),
     ]
+
+    def __init__(self):
+        super().__init__()
+        self._history: list[dict] = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -56,10 +58,9 @@ class GreenteaApp(App):
 
     def on_mount(self) -> None:
         self.title = "greentea"
-        self.sub_title = "greenclaw chat — skeleton, no AI wired up yet"
+        self.sub_title = MODEL
         log = self.query_one("#log", RichLog)
-        log.write("[dim]greentea skeleton running. No greenclaw connection yet — "
-                   "messages just echo into this log for now.[/dim]")
+        log.write(f"[dim]Connected to {MODEL} via Ollama.[/dim]")
         self.query_one("#message-input", Input).focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -67,21 +68,69 @@ class GreenteaApp(App):
         if not text:
             return
 
+        event.input.value = ""
+
+        if text == "/clear":
+            self.action_clear_log()
+            return
+
         log = self.query_one("#log", RichLog)
         timestamp = datetime.now().strftime("%H:%M")
         log.write(f"[bold cyan]you[/bold cyan] [dim]{timestamp}[/dim]  {text}")
 
-        # Placeholder response so the loop is visibly a round-trip even
-        # before greenclaw is wired in. Swap point: once greenclaw#41's
-        # local channel exists, replace this with a real call and
-        # write the actual response here instead.
-        log.write(f"[bold green]greentea[/bold green] [dim]{timestamp}[/dim]  "
-                  f"(no AI connected yet — echoing) {text}")
+        self._history.append({"role": "user", "content": text})
+        event.input.disabled = True
+        event.input.placeholder = "Waiting for response…"
 
-        event.input.value = ""
+        self._fetch_response(list(self._history), timestamp)
+
+    @work(exclusive=False, thread=True)
+    def _fetch_response(self, history: list[dict], timestamp: str) -> None:
+        log = self.query_one("#log", RichLog)
+        input_widget = self.query_one("#message-input", Input)
+        chunks: list[str] = []
+
+        try:
+            with httpx.stream(
+                "POST",
+                OLLAMA_URL,
+                json={"model": MODEL, "messages": history, "stream": True},
+                timeout=120.0,
+            ) as r:
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    chunk = data.get("message", {}).get("content", "")
+                    if chunk:
+                        chunks.append(chunk)
+                    if data.get("done"):
+                        break
+
+            response_text = "".join(chunks)
+            self._history.append({"role": "assistant", "content": response_text})
+
+            self.call_from_thread(
+                log.write,
+                f"[bold green]greentea[/bold green] [dim]{timestamp}[/dim]  {response_text}",
+            )
+
+        except Exception as e:
+            self.call_from_thread(log.write, f"[bold red]error[/bold red]  {e}")
+
+        def re_enable():
+            input_widget.disabled = False
+            input_widget.placeholder = "Type a message and press Enter…"
+            input_widget.focus()
+
+        self.call_from_thread(re_enable)
 
     def action_clear_log(self) -> None:
-        self.query_one("#log", RichLog).clear()
+        self._history.clear()
+        log = self.query_one("#log", RichLog)
+        log.clear()
+        log.write(f"[dim]Connected to {MODEL} via Ollama.[/dim]")
 
 
 def main() -> None:

@@ -1,3 +1,4 @@
 textual>=8.0
 textual-dev
 textual-serve
+httpx
