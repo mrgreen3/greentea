@@ -40,17 +40,34 @@ def read_piped_screen() -> str:
     return data.strip()
 
 
-def ask_model(screen_content: str) -> str:
+def ask_question() -> str:
+    """Open walker for the user to type a question. Returns empty string if dismissed."""
+    try:
+        result = subprocess.run(
+            ["walker", "--dmenu", "--inputonly", "--placeholder", "Ask about your terminal...", "--theme", "paint"],
+            input="",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return result.stdout.strip()
+    except FileNotFoundError:
+        sys.stderr.write("greentea-ask: walker not found\n")
+        return ""
+
+
+def ask_model(screen_content: str, question: str) -> str:
     """Send the screen content to Ollama and return the model's reply.
 
     Swap point: if greenclaw grows a local query interface, this is
     the only function that needs to change.
     """
+    user_content = f"Screen:\n{screen_content or '(empty)'}\n\nQuestion: {question}"
     payload = {
         "model": MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": screen_content or "(empty screen)"},
+            {"role": "user", "content": user_content},
         ],
         "stream": False,
     }
@@ -67,7 +84,7 @@ def ask_model(screen_content: str) -> str:
     except urllib.error.URLError as e:
         return f"greentea-ask: couldn't reach Ollama at {OLLAMA_URL} ({e})"
     except Exception as e:
-        return f"greentea-ask: unexpected error ({e})"
+        return f"greentea-ask: unexpected error: {e}"
 
 
 def show_in_walker(text: str) -> None:
@@ -93,7 +110,10 @@ def show_in_walker(text: str) -> None:
 
 def main() -> None:
     screen = read_piped_screen()
-    answer = ask_model(screen)
+    question = ask_question()
+    if not question:
+        sys.exit(0)
+    answer = ask_model(screen, question)
     show_in_walker(answer)
 
 
