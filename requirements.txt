@@ -2,3 +2,8 @@ textual>=8.0
 textual-dev
 textual-serve
 httpx
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+ddgs
