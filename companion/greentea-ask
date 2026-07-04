@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 import urllib.request
+import textwrap
 
 OLLAMA_URL = os.environ.get("GREENTEA_OLLAMA_URL", "http://localhost:11434")
 MODEL = os.environ.get("GREENTEA_MODEL", "kimi-k2.7-code:cloud")
@@ -101,12 +102,22 @@ def show_answer(text: str) -> None:
 
 
 def main() -> None:
-    screen = read_piped_screen()
-    question = ask_question()
-    if not question:
-        sys.exit(0)
-    answer = ask_model(screen, question)
-    show_answer(answer)
+    if len(sys.argv) > 1:
+        # Terminal invocation: question from args, answer to stdout
+        question = " ".join(sys.argv[1:]).strip()
+        if not question:
+            sys.exit("usage: greentea-ask <question>")
+        screen = ""
+        answer = ask_model(screen, question)
+        print(textwrap.fill(answer, width=80))
+    else:
+        # foot pipe invocation: screen from stdin, question via rofi, answer via rofi
+        screen = read_piped_screen()
+        question = ask_question()
+        if not question:
+            sys.exit(0)
+        answer = ask_model(screen, question)
+        show_answer(answer)
 
 
 if __name__ == "__main__":
