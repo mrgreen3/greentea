@@ -1,10 +1,16 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
+import asyncio
 import httpx
 import json
+import os
+import re
+import subprocess
+import time
+import urllib.request
+import urllib.error
 import uuid
 import ipaddress
-import re
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from ddgs import DDGS
@@ -19,6 +25,17 @@ MODEL = "gemma4:cloud"
 MAX_TOOL_ROUNDS = 5  # prevent infinite loops
 
 sessions: dict[str, list[dict]] = {}
+
+# --- Stats config (reads greenclaw data files directly) ---
+_HOME = os.path.expanduser("~")
+GREENCLAW_DIR   = os.path.expanduser(os.environ.get("GREENCLAW_DIR",   "~/greenclaw"))
+SCHEDULES_DIR   = os.path.expanduser(os.environ.get("SCHEDULES_DIR",   "~/greenclaw/schedules"))
+NOTES_FILE      = os.path.expanduser(os.environ.get("NOTES_FILE",      "~/notes.md"))
+CC_LOG_FILE     = os.path.join(GREENCLAW_DIR, "cc_calls.jsonl")
+MEMORY_DIR      = os.path.expanduser("~/.claude/projects/-home-mrgreen/memory")
+SCHEDULE_STATE  = os.path.expanduser("~/.local/share/greenclaw/schedule.json")
+GITHUB_REPO     = os.environ.get("GITHUB_REPO",  "mrgreen3/greenclaw")
+GITHUB_TOKEN    = os.environ.get("GITHUB_TOKEN", "")
 
 TOOLS = [
     {
@@ -99,7 +116,6 @@ def _is_private_host(url: str) -> bool:
         return addr.is_private or addr.is_loopback or addr.is_link_local
     except ValueError:
         pass
-    # Hostname — block obvious local names
     return host.endswith(".local") or host.endswith(".internal")
 
 
@@ -107,7 +123,6 @@ def tool_image_search(query: str) -> str:
     results = DDGS().images(query, max_results=4)
     if not results:
         return "No images found."
-    # Return markdown image tags — marked.js renders these as <img>
     lines = [f"![{r.get('title', query)}]({r['image']})" for r in results if r.get("image")]
     return "\n".join(lines)
 
@@ -134,7 +149,6 @@ async def tool_fetch_url(url: str) -> str:
         if "text" not in ct and "json" not in ct:
             return "Error: non-text content type."
         text = resp.text
-    # Strip HTML tags
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:6000]
@@ -164,10 +178,256 @@ async def ollama_once(messages: list, stream: bool = False) -> dict:
         return resp.json()
 
 
+# ---------------------------------------------------------------------------
+# Stats helpers — read greenclaw data files directly (same machine)
+# ---------------------------------------------------------------------------
+
+def _parse_front_matter(text: str) -> dict:
+    """Parse YAML-lite front matter from a markdown file."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    meta = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if ":" in line:
+            k, v = line.split(":", 1)
+            meta[k.strip()] = v.strip()
+    return meta
+
+
+def _get_system_stats() -> dict:
+    try:
+        with open("/proc/uptime") as f:
+            secs = float(f.read().split()[0])
+        d, rem = divmod(int(secs), 86400)
+        h, rem = divmod(rem, 3600)
+        m = rem // 60
+        uptime = f"{d}d {h}h {m}m" if d else f"{h}h {m}m"
+    except Exception:
+        uptime = "unknown"
+
+    # CPU — two samples 0.5s apart
+    cpu_pct = None
+    try:
+        def _cpu_times():
+            with open("/proc/stat") as f:
+                parts = f.readline().split()
+            vals = [int(x) for x in parts[1:]]
+            idle = vals[3]
+            total = sum(vals)
+            return idle, total
+        i1, t1 = _cpu_times()
+        time.sleep(0.5)
+        i2, t2 = _cpu_times()
+        dt = t2 - t1
+        cpu_pct = round((1 - (i2 - i1) / dt) * 100, 1) if dt else 0.0
+    except Exception:
+        pass
+
+    # RAM
+    ram_used = ram_total = ram_pct = None
+    try:
+        mem = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, v = line.split(":", 1)
+                mem[k.strip()] = int(v.split()[0])
+        total_kb = mem.get("MemTotal", 0)
+        avail_kb = mem.get("MemAvailable", 0)
+        used_kb  = total_kb - avail_kb
+        ram_total = f"{total_kb // 1024} MB"
+        ram_used  = f"{used_kb  // 1024} MB"
+        ram_pct   = round(used_kb / total_kb * 100, 1) if total_kb else 0
+    except Exception:
+        pass
+
+    # Disk
+    disk_used = disk_total = disk_pct = None
+    try:
+        out = subprocess.check_output(["df", "-k", "/"], text=True).splitlines()
+        parts = out[1].split()
+        disk_total = f"{int(parts[1]) // 1024} MB"
+        disk_used  = f"{int(parts[2]) // 1024} MB"
+        disk_pct   = parts[4]
+    except Exception:
+        pass
+
+    # Load
+    load = None
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+        load = f"{parts[0]} {parts[1]} {parts[2]}"
+    except Exception:
+        pass
+
+    # Hostname
+    hostname = None
+    try:
+        hostname = subprocess.check_output(["hostname"], text=True).strip()
+    except Exception:
+        pass
+
+    return {
+        "hostname": hostname,
+        "uptime":   uptime,
+        "cpu_pct":  cpu_pct,
+        "ram_used": ram_used,
+        "ram_total": ram_total,
+        "ram_pct":  ram_pct,
+        "disk_used": disk_used,
+        "disk_total": disk_total,
+        "disk_pct": disk_pct,
+        "load":     load,
+    }
+
+
+def _get_cc_stats() -> dict:
+    today_str = time.strftime("%Y-%m-%d")
+    week_ago  = time.time() - 7 * 86400
+    today_count = week_count = 0
+    recent_prompts: list[str] = []
+
+    if os.path.exists(CC_LOG_FILE):
+        try:
+            with open(CC_LOG_FILE) as f:
+                lines = f.readlines()
+            for line in lines:
+                try:
+                    r = json.loads(line)
+                    ts = r.get("ts", "")
+                    prompt = r.get("prompt", "").strip()
+                    # Strip injected context blocks
+                    prompt = re.sub(r"^\[Current date.*?\]\s*", "", prompt, flags=re.DOTALL)
+                    prompt = re.sub(r"--- long-term memory ---.*?---", "", prompt, flags=re.DOTALL)
+                    prompt = re.sub(r"--- recent conversation ---.*", "", prompt, flags=re.DOTALL).strip()
+                    if ts.startswith(today_str):
+                        today_count += 1
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(ts)
+                        if dt.timestamp() >= week_ago:
+                            week_count += 1
+                    except Exception:
+                        pass
+                    if prompt:
+                        recent_prompts.append(prompt[:100])
+                except Exception:
+                    continue
+            recent_prompts = recent_prompts[-6:][::-1]
+        except Exception:
+            pass
+
+    return {
+        "today": today_count,
+        "week":  week_count,
+        "recent_prompts": recent_prompts,
+    }
+
+
+def _get_memory_vault() -> dict:
+    if not os.path.isdir(MEMORY_DIR):
+        return {"count": 0, "total_kb": 0, "files": []}
+    files = []
+    total = 0
+    for fn in sorted(os.listdir(MEMORY_DIR)):
+        if not fn.endswith(".md") or fn == "MEMORY.md":
+            continue
+        path = os.path.join(MEMORY_DIR, fn)
+        try:
+            size = os.path.getsize(path)
+            total += size
+            files.append({"name": fn[:-3], "kb": round(size / 1024, 1)})
+        except OSError:
+            pass
+    return {"count": len(files), "total_kb": round(total / 1024, 1), "files": files}
+
+
+def _get_schedules() -> list:
+    if not os.path.isdir(SCHEDULES_DIR):
+        return []
+    state = {}
+    if os.path.exists(SCHEDULE_STATE):
+        try:
+            with open(SCHEDULE_STATE) as f:
+                state = json.load(f)
+        except Exception:
+            pass
+    scheds = []
+    for fn in sorted(os.listdir(SCHEDULES_DIR)):
+        if not fn.endswith(".md"):
+            continue
+        try:
+            with open(os.path.join(SCHEDULES_DIR, fn)) as f:
+                meta = _parse_front_matter(f.read())
+            name = meta.get("name") or fn[:-3]
+            sched_time = meta.get("schedule", "")
+            last_ran = state.get(name, "")
+            # Shorten last_ran to date+time
+            if last_ran and "T" in last_ran:
+                last_ran = last_ran[:16].replace("T", " ")
+            scheds.append({"name": name, "time": sched_time, "last_ran": last_ran})
+        except Exception:
+            continue
+    return scheds
+
+
+def _get_notes() -> list:
+    if not os.path.exists(NOTES_FILE):
+        return []
+    try:
+        with open(NOTES_FILE) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        return lines[-6:][::-1]
+    except Exception:
+        return []
+
+
+def _get_github_issues() -> list:
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/issues?state=open&per_page=10"
+    try:
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "greentea/1.0")
+        if GITHUB_TOKEN:
+            req.add_header("Authorization", f"token {GITHUB_TOKEN}")
+        with urllib.request.urlopen(req, timeout=8) as r:
+            items = json.loads(r.read())
+        return [
+            {"number": i["number"], "title": i["title"], "url": i["html_url"]}
+            for i in items
+            if "pull_request" not in i
+        ]
+    except Exception:
+        return []
+
+
+def _gather_all_stats() -> dict:
+    return {
+        "system":    _get_system_stats(),
+        "cc":        _get_cc_stats(),
+        "memory":    _get_memory_vault(),
+        "schedules": _get_schedules(),
+        "notes":     _get_notes(),
+        "issues":    _get_github_issues(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
 @app.get("/")
 async def index():
     html = _jinja_env.get_template("index.html").render()
     return HTMLResponse(content=html)
+
+
+@app.get("/stats")
+async def stats():
+    data = await asyncio.to_thread(_gather_all_stats)
+    return JSONResponse(content=data)
 
 
 @app.post("/chat")
@@ -184,7 +444,6 @@ async def chat(request: Request):
     async def generate():
         history = sessions[session_id]
 
-        # Tool loop: non-streaming until model stops calling tools
         for _ in range(MAX_TOOL_ROUNDS):
             result = await ollama_once(history)
             msg = result.get("message", {})
@@ -211,15 +470,12 @@ async def chat(request: Request):
                     except json.JSONDecodeError:
                         args = {}
 
-                # status event — frontend shows as dim pill, not in bubble
                 query = args.get("query") or args.get("url") or ""
                 yield f"event: status\ndata: {json.dumps(name + ': ' + query)}\n\n"
 
                 tool_result = await run_tool(name, args)
                 history.append({"role": "tool", "content": tool_result})
 
-                # Emit tool result directly so images appear immediately,
-                # regardless of whether the model chooses to echo them
                 if name == "image_search" and tool_result and not tool_result.startswith("Error"):
                     yield f"event: tool_result\ndata: {json.dumps(tool_result)}\n\n"
 
