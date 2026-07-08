@@ -420,10 +420,18 @@ def _gather_all_stats() -> dict:
 # Routes
 # ---------------------------------------------------------------------------
 
+_FAVICON_SVG = (Path(__file__).parent / "favicon.svg").read_text()
+
+
 @app.get("/")
 async def index():
     html = _jinja_env.get_template("index.html").render(model=MODEL, models=AVAILABLE_MODELS)
     return HTMLResponse(content=html)
+
+
+@app.get("/favicon.svg")
+async def favicon():
+    return HTMLResponse(content=_FAVICON_SVG, media_type="image/svg+xml")
 
 
 @app.get("/stats")
