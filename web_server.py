@@ -22,9 +22,11 @@ _jinja_env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)), autoescape
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "gemma4:cloud"
+AVAILABLE_MODELS = ["gemma4:cloud", "glm-5.2:cloud", "qwen3-coder:480b-cloud", "gpt-oss:120b-cloud"]
 MAX_TOOL_ROUNDS = 5  # prevent infinite loops
 
 sessions: dict[str, list[dict]] = {}
+session_models: dict[str, str] = {}
 
 # --- Stats config (reads greenclaw data files directly) ---
 _HOME = os.path.expanduser("~")
@@ -167,12 +169,12 @@ async def run_tool(name: str, args: dict) -> str:
         return f"Tool error: {e}"
 
 
-async def ollama_once(messages: list, stream: bool = False) -> dict:
+async def ollama_once(messages: list, model: str = MODEL, stream: bool = False) -> dict:
     """Single non-streaming call to Ollama. Returns parsed response dict."""
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
             OLLAMA_URL,
-            json={"model": MODEL, "messages": messages, "tools": TOOLS, "stream": False},
+            json={"model": model, "messages": messages, "tools": TOOLS, "stream": False},
         )
         resp.raise_for_status()
         return resp.json()
@@ -420,7 +422,7 @@ def _gather_all_stats() -> dict:
 
 @app.get("/")
 async def index():
-    html = _jinja_env.get_template("index.html").render()
+    html = _jinja_env.get_template("index.html").render(model=MODEL, models=AVAILABLE_MODELS)
     return HTMLResponse(content=html)
 
 
@@ -435,9 +437,14 @@ async def chat(request: Request):
     body = await request.json()
     message = body.get("message", "")
     session_id = body.get("session_id") or str(uuid.uuid4())
+    requested_model = body.get("model")
 
     if session_id not in sessions:
         sessions[session_id] = []
+
+    if requested_model in AVAILABLE_MODELS:
+        session_models[session_id] = requested_model
+    model = session_models.get(session_id, MODEL)
 
     sessions[session_id].append({"role": "user", "content": message})
 
@@ -445,7 +452,7 @@ async def chat(request: Request):
         history = sessions[session_id]
 
         for _ in range(MAX_TOOL_ROUNDS):
-            result = await ollama_once(history)
+            result = await ollama_once(history, model=model)
             msg = result.get("message", {})
             tool_calls = msg.get("tool_calls")
 

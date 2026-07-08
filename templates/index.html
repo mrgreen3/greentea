@@ -34,6 +34,25 @@ html, body {
   height: 100vh;
 }
 
+#main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#chat-col {
+  display: flex;
+  flex-direction: column;
+  flex: 6;
+  min-width: 0;
+}
+
+@media (max-width: 800px) {
+  #main { flex-direction: column; }
+  #stats-panel { width: auto; max-height: 40vh; border-left: none; border-top: 1px solid var(--border); }
+}
+
 /* ── Header ── */
 #header {
   display: flex;
@@ -221,6 +240,22 @@ html, body {
   align-items: flex-end;
 }
 
+#model-select {
+  flex-shrink: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+#model-select:hover, #model-select:focus { color: var(--text); border-color: var(--text-muted); }
+#model-select:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+
 #input {
   flex: 1;
   background: var(--surface-2);
@@ -296,37 +331,17 @@ html, body {
   .typing-dot { animation: none; opacity: 0.6; }
 }
 
-/* ── Tab buttons ── */
-.tab-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  padding: 3px 10px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-  margin-left: 6px;
-}
-.tab-btn:hover { color: var(--text); border-color: var(--text-muted); }
-.tab-btn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-.tab-btn[aria-selected="true"] {
-  color: var(--green);
-  border-color: var(--green);
-  background: var(--green-dim);
-}
-
 /* ── Stats panel ── */
 #stats-panel {
-  flex: 1;
+  flex: 4;
+  min-width: 260px;
   overflow-y: auto;
   padding: 16px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-content: start;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
 }
 #stats-panel::-webkit-scrollbar { width: 6px; }
 #stats-panel::-webkit-scrollbar-track { background: transparent; }
@@ -377,32 +392,39 @@ html, body {
   <header id="header">
     <span class="logo">greentea</span>
     <div style="display:flex;gap:6px;align-items:center">
-      <button id="chat-tab" class="tab-btn" aria-selected="true">chat</button>
-      <button id="stats-tab" class="tab-btn" aria-selected="false">stats</button>
       <button id="clear-btn" title="Clear conversation">/clear</button>
     </div>
   </header>
 
-  <div id="messages">
-    <div id="empty-state">
-      <span class="hint-title">greentea</span>
-      <span class="hint-sub">Enter to send &nbsp;·&nbsp; Shift+Enter for newline</span>
+  <div id="main">
+    <div id="chat-col">
+      <div id="messages">
+        <div id="empty-state">
+          <span class="hint-title">greentea</span>
+          <span class="hint-sub">Enter to send &nbsp;·&nbsp; Shift+Enter for newline</span>
+        </div>
+      </div>
+
+      <div id="input-area">
+        <textarea id="input" placeholder="ask something..." rows="1" autocomplete="off" spellcheck="false"></textarea>
+        <select id="model-select" title="active model">
+          {% for m in models %}
+          <option value="{{ m }}" {% if m == model %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+        <button id="send-btn">send</button>
+      </div>
     </div>
-  </div>
 
-  <div id="stats-panel" hidden>
-    <div class="stats-card" id="stats-system"><h3>system</h3><div class="stats-body">loading…</div></div>
-    <div class="stats-card" id="stats-cc"><h3>claude code</h3><div class="stats-body">loading…</div></div>
-    <div class="stats-card" id="stats-memory"><h3>memory vault</h3><div class="stats-body">loading…</div></div>
-    <div class="stats-card" id="stats-schedules"><h3>schedules</h3><div class="stats-body">loading…</div></div>
-    <div class="stats-card" id="stats-notes"><h3>recent notes</h3><div class="stats-body">loading…</div></div>
-    <div class="stats-card" id="stats-issues"><h3>github issues</h3><div class="stats-body">loading…</div></div>
-    <div id="stats-ts"></div>
-  </div>
-
-  <div id="input-area">
-    <textarea id="input" placeholder="ask something..." rows="1" autocomplete="off" spellcheck="false"></textarea>
-    <button id="send-btn">send</button>
+    <div id="stats-panel">
+      <div class="stats-card" id="stats-system"><h3>system</h3><div class="stats-body">loading…</div></div>
+      <div class="stats-card" id="stats-cc"><h3>claude code</h3><div class="stats-body">loading…</div></div>
+      <div class="stats-card" id="stats-memory"><h3>memory vault</h3><div class="stats-body">loading…</div></div>
+      <div class="stats-card" id="stats-schedules"><h3>schedules</h3><div class="stats-body">loading…</div></div>
+      <div class="stats-card" id="stats-notes"><h3>recent notes</h3><div class="stats-body">loading…</div></div>
+      <div class="stats-card" id="stats-issues"><h3>github issues</h3><div class="stats-body">loading…</div></div>
+      <div id="stats-ts"></div>
+    </div>
   </div>
 </div>
 
@@ -485,6 +507,16 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   const sessionId = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
     (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
   );
+
+  /* ── Model select ── */
+  const modelSelect = document.getElementById('model-select');
+  const savedModel = localStorage.getItem('greentea-model');
+  if (savedModel && [...modelSelect.options].some(o => o.value === savedModel)) {
+    modelSelect.value = savedModel;
+  }
+  modelSelect.addEventListener('change', () => {
+    localStorage.setItem('greentea-model', modelSelect.value);
+  });
 
   // Override marked image renderer to wrap in a link (click = full size)
   marked.use({ renderer: {
@@ -572,7 +604,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           'Content-Type': 'application/json',
           'X-Session-Id': sessionId,
         },
-        body: JSON.stringify({ message: text, session_id: sessionId }),
+        body: JSON.stringify({ message: text, session_id: sessionId, model: modelSelect.value }),
       });
 
       if (!resp.ok) {
@@ -717,31 +749,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   });
 
 
-  /* ── Tab switching ── */
-  const chatTabBtn  = document.getElementById('chat-tab');
-  const statsTabBtn = document.getElementById('stats-tab');
-  const statsPanel  = document.getElementById('stats-panel');
-  const inputArea   = document.getElementById('input-area');
-  let statsInterval = null;
-
-  function showChat() {
-    messagesEl.hidden = false;
-    inputArea.hidden  = false;
-    statsPanel.hidden = true;
-    chatTabBtn.setAttribute('aria-selected', 'true');
-    statsTabBtn.setAttribute('aria-selected', 'false');
-    if (statsInterval) { clearInterval(statsInterval); statsInterval = null; }
-  }
-
-  function showStats() {
-    messagesEl.hidden = true;
-    inputArea.hidden  = true;
-    statsPanel.hidden = false;
-    chatTabBtn.setAttribute('aria-selected', 'false');
-    statsTabBtn.setAttribute('aria-selected', 'true');
-    loadStats();
-    statsInterval = setInterval(loadStats, 30000);
-  }
+  /* ── Stats sidebar: load on start, refresh periodically ── */
+  loadStats();
+  setInterval(loadStats, 30000);
 
   async function loadStats() {
     try {
@@ -815,9 +825,6 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         ).join('')
       : '<div class="stats-item" style="color:var(--text-muted)">no open issues</div>';
   }
-
-  chatTabBtn.addEventListener('click', showChat);
-  statsTabBtn.addEventListener('click', showStats);
 
   inputEl.focus();
 })();
