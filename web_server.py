@@ -5,6 +5,8 @@ import httpx
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import time
 import urllib.request
@@ -24,6 +26,10 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "gemma4:cloud"
 AVAILABLE_MODELS = ["gemma4:cloud", "glm-5.2:cloud", "qwen3-coder:480b-cloud", "gpt-oss:120b-cloud"]
 MAX_TOOL_ROUNDS = 5  # prevent infinite loops
+
+CC_BIN = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+CC_MODEL = "claude-haiku-4-5-20251001"
+CC_TIMEOUT = 900  # 15 minutes, matches greenclaw's ask_cc
 
 sessions: dict[str, list[dict]] = {}
 session_models: dict[str, str] = {}
@@ -178,6 +184,32 @@ async def ollama_once(messages: list, model: str = MODEL, stream: bool = False) 
         )
         resp.raise_for_status()
         return resp.json()
+
+
+def run_claude_code(prompt: str) -> str:
+    """Headless Claude Code call, full autonomy — mirrors greenclaw's ask_cc()."""
+    if not os.path.exists(CC_BIN):
+        return "[error] claude CLI not found"
+    try:
+        cc_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        p = subprocess.Popen(
+            [CC_BIN, "-p", prompt, "--model", CC_MODEL, "--dangerously-skip-permissions"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=cc_env, start_new_session=True,
+        )
+        try:
+            out, err = p.communicate(timeout=CC_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.communicate()
+            return "[error] Claude Code timed out (15m)"
+        out = (out or "").strip()
+        err = (err or "").strip()
+        if err:
+            out += ("\n[stderr] " + err) if out else ("[stderr] " + err)
+        return out or "(no output)"
+    except Exception as e:
+        return f"[error] {e}"
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +462,7 @@ async def index():
 
 
 @app.get("/favicon.svg")
+@app.get("/favicon.ico")
 async def favicon():
     return HTMLResponse(content=_FAVICON_SVG, media_type="image/svg+xml")
 
@@ -456,8 +489,22 @@ async def chat(request: Request):
 
     sessions[session_id].append({"role": "user", "content": message})
 
+    stripped = message.strip()
+    cc_prompt = None
+    if stripped.lower() == "cc" or stripped.lower().startswith("cc "):
+        cc_prompt = stripped[2:].strip()
+
     async def generate():
         history = sessions[session_id]
+
+        if cc_prompt is not None:
+            yield f"event: status\ndata: {json.dumps('delegating to claude code...')}\n\n"
+            content = await asyncio.to_thread(run_claude_code, cc_prompt)
+            history.append({"role": "assistant", "content": content})
+            for word in content.split(" "):
+                yield f"data: {json.dumps(word + ' ')}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         for _ in range(MAX_TOOL_ROUNDS):
             result = await ollama_once(history, model=model)
